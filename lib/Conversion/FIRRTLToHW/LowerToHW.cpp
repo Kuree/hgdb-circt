@@ -956,6 +956,17 @@ LogicalResult FIRRTLModuleLowering::lowerPorts(
     hwPort.sym = firrtlPort.sym ? firrtlPort.sym.getSymName()
                                 : StringAttr::get(moduleOp->getContext(), "");
 
+    // Pass down the debug attr if any
+    // Notice that hasAnnotation does not work since the debug attribute
+    // is not inserted as a class
+    for (auto anno : firrtlPort.annotations) {
+      auto annoDict = anno.getDict();
+      if (auto debugAttr = annoDict.get("hw.debug.name")) {
+        hwPort.debugAttr = debugAttr.cast<StringAttr>();
+        firrtlPort.annotations.removeAnnotation(anno);
+        break;
+      }
+    }
     // We can't lower all types, so make sure to cleanly reject them.
     if (!hwPort.type) {
       moduleOp->emitError("cannot lower this port type to HW");
@@ -3673,7 +3684,6 @@ void FIRRTLLowering::lowerRegConnect(const FieldRef &fieldRef, Value dest,
       auto index = vector.getIndexForFieldID(fieldID);
       fieldID -= vector.getFieldID(index);
 
-<<<<<<< HEAD
       auto ty = hw::type_cast<hw::ArrayType>(base.getType());
       auto elemTy = ty.getElementType();
 
@@ -3754,7 +3764,7 @@ LogicalResult FIRRTLLowering::visitStmt(ConnectOp op) {
   if (!destVal.getType().isa<hw::InOutType>())
     return op.emitError("destination isn't an inout type");
 
-  builder.create<sv::AssignOp>(destVal, srcVal);
+  auto assignOp = builder.create<sv::AssignOp>(destVal, srcVal);
   if (auto debugAttr = op->getAttr("hw.debug.name")) {
     assignOp->setAttr("hw.debug.name", debugAttr);
   }
