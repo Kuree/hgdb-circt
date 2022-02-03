@@ -1196,7 +1196,6 @@ FIRRTLModuleLowering::lowerModule(FModuleOp oldModule, Block *topLevelModule,
 
   if (handleForceNameAnnos(oldModule, annos, loweringState))
     return {};
-
   loweringState.processRemainingAnnotations(oldModule, annos);
   return newModule;
 }
@@ -1805,6 +1804,11 @@ void FIRRTLLowering::optimizeTemporaryWire(sv::WireOp wire) {
   SmallVector<sv::ReadInOutOp> reads;
   sv::AssignOp write;
 
+  // if the wire has debug attributes, skip it
+  if (wire->hasAttr("hw.debug.name")) {
+    return;
+  }
+
   for (auto *user : wire->getUsers()) {
     if (auto read = dyn_cast<sv::ReadInOutOp>(user)) {
       reads.push_back(read);
@@ -2212,6 +2216,10 @@ template <typename ResultOpType, typename... CtorArgTypes>
 LogicalResult FIRRTLLowering::setLoweringTo(Operation *orig,
                                             CtorArgTypes... args) {
   auto result = builder.createOrFold<ResultOpType>(args...);
+  if (auto debugAttr = orig->getAttr("hw.debug.name")) {
+    auto *op = result.getDefiningOp();
+    op->setAttr("hw.debug.name", debugAttr);
+  }
   if (auto *op = result.getDefiningOp())
     tryCopyName(op, orig);
   return setPossiblyFoldedLowering(orig->getResult(0), result);
@@ -2282,6 +2290,10 @@ Value FIRRTLLowering::getReadValue(Value v) {
     // Otherwise, create a read inout operation.
     result = builder.createOrFold<sv::ReadInOutOp>(v);
   }
+  if (auto *vOp = v.getDefiningOp()) {
+    if (auto debugAttr = vOp->getAttr("hw.debug.name")) {
+      result.getDefiningOp()->setAttr("hw.debug.name", debugAttr);
+    }
   builder.restoreInsertionPoint(oldIP);
   readInOutCreated.insert({v, result});
   return result;
@@ -2675,8 +2687,12 @@ LogicalResult FIRRTLLowering::visitDecl(NodeOp op) {
 
   if (symName) {
     auto wire = builder.create<sv::WireOp>(operand.getType(), name, symName);
-    builder.create<sv::AssignOp>(wire, operand);
+    auto assign = builder.create<sv::AssignOp>(wire, operand);
     operand = builder.create<sv::ReadInOutOp>(wire);
+    auto assign = builder.create<sv::AssignOp>(wire, operand);
+    if (auto debugAttr = op->getAttr("hw.debug.name")) {
+      assign->setAttr("hw.debug.name", debugAttr);
+    }
   }
 
   return setLowering(op, operand);
@@ -2756,6 +2772,8 @@ LogicalResult FIRRTLLowering::visitDecl(RegResetOp op) {
     reg->setAttr("firrtl.random_init_start", randomStart);
   if (auto randomEnd = op->getAttr("firrtl.random_init_end"))
     reg->setAttr("firrtl.random_init_end", randomEnd);
+  if (auto debugAttr = op->getAttr("hw.debug.name"))
+    reg->setAttr("hw.debug.name", debugAttr);
 
   inputEdge.setValue(reg);
   circuitState.used_RANDOMIZE_REG_INIT = 1;
@@ -3019,8 +3037,20 @@ LogicalResult FIRRTLLowering::visitDecl(InstanceOp oldInstance) {
 
     // Create a wire for each input/inout operand, so there is
     // something to connect to.
-    Value wire =
-        createTmpWireOp(portType, "." + port.getName().str() + ".wire");
+    auto w = createTmpWireOp(portType, "." + port.getName().str() + ".wire");
+    Value wire = w;
+
+    // migrate the renaming process
+    auto *op = wire.getDefiningOp();
+    auto &annos = port.annotations;
+    if (op) {
+      for (auto const &attr : annos) {
+        auto const &dict = attr.getDict();
+        if (auto name = dict.get("hw.debug.name")) {
+          w->setAttr("hw.debug.name", name);
+        }
+      }
+    }
 
     // Know that the argument FIRRTL value is equal to this wire, allowing
     // connects to it to be lowered.
@@ -3643,6 +3673,7 @@ void FIRRTLLowering::lowerRegConnect(const FieldRef &fieldRef, Value dest,
       auto index = vector.getIndexForFieldID(fieldID);
       fieldID -= vector.getFieldID(index);
 
+<<<<<<< HEAD
       auto ty = hw::type_cast<hw::ArrayType>(base.getType());
       auto elemTy = ty.getElementType();
 
@@ -3695,7 +3726,10 @@ void FIRRTLLowering::lowerRegConnect(const FieldRef &fieldRef, Value dest,
     nextValue =
         inject(seqReg.getNext(), regOp->getResult(0).getType(), fieldID);
   }
-  seqReg.getNextMutable().assign(nextValue);
+  auto assignOp = seqReg.getNextMutable().assign(nextValue);
+  if (auto debugAttr = op->getAttr("hw.debug.name")) {
+    assignOp->setAttr("hw.debug.name", debugAttr);
+  }
 }
 
 LogicalResult FIRRTLLowering::visitStmt(ConnectOp op) {
@@ -3721,6 +3755,9 @@ LogicalResult FIRRTLLowering::visitStmt(ConnectOp op) {
     return op.emitError("destination isn't an inout type");
 
   builder.create<sv::AssignOp>(destVal, srcVal);
+  if (auto debugAttr = op->getAttr("hw.debug.name")) {
+    assignOp->setAttr("hw.debug.name", debugAttr);
+  }
   return success();
 }
 

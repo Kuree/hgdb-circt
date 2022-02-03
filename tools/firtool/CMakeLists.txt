@@ -17,6 +17,7 @@ target_link_libraries(firtool PRIVATE
   CIRCTSeqTransforms
   CIRCTSVTransforms
   CIRCTTransforms
+  CIRCTDebug
 
   MLIRBytecodeReader
   MLIRBytecodeWriter

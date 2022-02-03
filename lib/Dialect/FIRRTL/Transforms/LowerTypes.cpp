@@ -348,9 +348,10 @@ struct TypeLoweringVisitor : public FIRRTLVisitor<TypeLoweringVisitor, bool> {
   TypeLoweringVisitor(MLIRContext *context,
                       PreserveAggregate::PreserveMode preserveAggregate,
                       bool preservePublicTypes, SymbolTable &symTbl,
-                      const AttrCache &cache)
+                      const AttrCache &cache, bool insertDebugInfo)
       : context(context), aggregatePreservationMode(preserveAggregate),
-        preservePublicTypes(preservePublicTypes), symTbl(symTbl), cache(cache) {
+        preservePublicTypes(preservePublicTypes), symTbl(symTbl), cache(cache),
+        insertDebugInfo(insertDebugInfo) {
   }
   using FIRRTLVisitor<TypeLoweringVisitor, bool>::visitDecl;
   using FIRRTLVisitor<TypeLoweringVisitor, bool>::visitExpr;
@@ -434,8 +435,11 @@ private:
   // Cache some attributes
   const AttrCache &cache;
 
+
   // Set true if the lowering failed.
   bool encounteredError = false;
+  // Inserts debug information to keep track of name changes
+  bool insertDebugInfo;
 };
 } // namespace
 
@@ -585,7 +589,16 @@ bool TypeLoweringVisitor::lowerProducer(
   auto baseNameLen = loweredName.size();
   auto oldAnno = op->getAttr("annotations").dyn_cast_or_null<ArrayAttr>();
 
-  for (auto field : fieldTypes) {
+  bool isArray = srcType.isa<FVectorType>();
+
+  for (auto fieldIdx = 0u; fieldIdx < fieldTypes.size(); fieldIdx++) {
+    auto field = fieldTypes[fieldIdx];
+    // if it's an array, need to add array idx
+    SmallString<16> targetName = baseName;
+    if (isArray) {
+      targetName.append(".");
+      targetName.append(std::to_string(fieldIdx));
+    }
     if (!loweredName.empty()) {
       loweredName.resize(baseNameLen);
       loweredName += field.suffix;
@@ -605,6 +618,9 @@ bool TypeLoweringVisitor::lowerProducer(
         newOp->setAttr(cache.nameKindAttr, nameKindAttr);
     }
     lowered.push_back(newVal);
+
+    if (insertDebugInfo)
+      newOp->setAttr("hw.debug.name", StringAttr::get(context, targetName));
   }
 
   processUsers(op->getResult(0), lowered);
@@ -722,9 +738,24 @@ bool TypeLoweringVisitor::lowerArg(FModuleLike module, size_t argIndex,
   if (!peelType(srcType, fieldTypes, getPreservatinoModeForModule(module)))
     return false;
 
+  // Get original arg name
+  auto originalName = newArgs[argIndex].name;
+
   for (const auto &field : llvm::enumerate(fieldTypes)) {
     auto newValue = addArg(module, 1 + argIndex + field.index(), argsRemoved,
                            srcType, field.value(), newArgs[argIndex]);
+    // Insert renaming attributes to keep track of the naming changes
+    // We store the original name as argName.subFieldName. subFieldName can
+    // be either a name or a number
+    if (insertDebugInfo) {
+      auto attrs = mlir::DictionaryAttr::get(
+          context,
+          {{StringAttr::get(context, "hw.debug.name"),
+            StringAttr::get(context, originalName.str() + "." +
+                                         field.value().suffix.substr(1))}});
+
+      newValue.second.annotations.addAnnotations(attrs);
+    }
     newArgs.insert(newArgs.begin() + 1 + argIndex + field.index(),
                    newValue.second);
     // Lower any other arguments by copying them to keep the relative order.
@@ -786,8 +817,38 @@ bool TypeLoweringVisitor::visitStmt(ConnectOp op) {
   SmallVector<FlatBundleFieldEntry> fields;
 
   // We have to expand connections even if the aggregate preservation is true.
-  if (!peelType(op.getDest().getType(), fields, PreserveAggregate::None))
+  if (!peelType(op.getDest().getType(), fields, PreserveAggregate::None)) {
+    // Store the name as well if enabled
+    if (!insertDebugInfo)
+      return false;
+    auto dest = op.dest();
+    if (auto *destOp = dest.getDefiningOp()) {
+      if (auto nameAttr = destOp->getAttr("name")) {
+        if (auto instOp = dest.getDefiningOp<InstanceOp>()) {
+          // this is an instance connection, need to treat differently
+          // since the defining OP would be the instance and therefore the
+          // naming would be wrong
+          auto const &results = instOp.results();
+          for (auto const &res : results) {
+            if (res == dest) {
+              // Need to obtain the name. a little hacky,
+              // but it's the best way I know of
+              auto resultNo = res.getResultNumber();
+              auto portName = instOp.getPortName(resultNo);
+              auto nameStr = nameAttr.cast<mlir::StringAttr>().str() + "_" +
+                             portName.str();
+              op->setAttr("hw.debug.name",
+                          mlir::StringAttr::get(context, nameStr));
+              break;
+            }
+          }
+        } else {
+          op->setAttr("hw.debug.name", nameAttr);
+        }
+      }
+    }
     return false;
+  }
 
   // Loop over the leaf aggregates.
   for (const auto &field : llvm::enumerate(fields)) {
@@ -1053,7 +1114,13 @@ bool TypeLoweringVisitor::visitDecl(WireOp op) {
     return builder->create<WireOp>(field.type, "", NameKindEnum::DroppableName,
                                    attrs, StringAttr{});
   };
-  return lowerProducer(op, clone);
+  auto handled = lowerProducer(op, clone);
+  if (insertDebugInfo && !handled && !op->hasAttr("hw.debug.name")) {
+    if (auto nameAttr = op->getAttr("name")) {
+      op->setAttr("hw.debug.name", nameAttr);
+    }
+  }
+  return handled;
 }
 
 /// Lower a reg op with a bundle to multiple non-bundled regs.
@@ -1076,7 +1143,14 @@ bool TypeLoweringVisitor::visitDecl(RegResetOp op) {
         field.type, op.getClockVal(), op.getResetSignal(), resetVal, "",
         NameKindEnum::DroppableName, attrs, StringAttr{});
   };
-  return lowerProducer(op, clone);
+  auto handled = lowerProducer(op, clone);
+  if (insertDebugInfo && !handled) {
+    // not a bundle type. op not changed
+    if (auto name = op->getAttr("name")) {
+      op->setAttr("hw.debug.name", name);
+    }
+  }
+  return handled;
 }
 
 /// Lower a wire op with a bundle to multiple non-bundled wires.
@@ -1344,9 +1418,10 @@ namespace {
 struct LowerTypesPass : public LowerFIRRTLTypesBase<LowerTypesPass> {
   LowerTypesPass(
       circt::firrtl::PreserveAggregate::PreserveMode preserveAggregateFlag,
-      bool preservePublicTypesFlag) {
+      bool preservePublicTypesFlag, bool insertDebugInfoFlag) {
     preserveAggregate = preserveAggregateFlag;
     preservePublicTypes = preservePublicTypesFlag;
+    insertDebugInfo = insertDebugInfoFlag;
   }
   void runOnOperation() override;
 };
@@ -1377,7 +1452,8 @@ void LowerTypesPass::runOnOperation() {
   // This lambda, executes in parallel for each Op within the circt.
   auto lowerModules = [&](FModuleLike op) -> LogicalResult {
     auto tl = TypeLoweringVisitor(&getContext(), preserveAggregate,
-                                  preservePublicTypes, symTbl, cache);
+                                  preservePublicTypes, symTbl, cache,
+                                  insertDebugInfo);
     tl.lowerModule(op);
 
     return LogicalResult::failure(tl.isFailed());
@@ -1392,7 +1468,9 @@ void LowerTypesPass::runOnOperation() {
 /// This is the pass constructor.
 std::unique_ptr<mlir::Pass>
 circt::firrtl::createLowerFIRRTLTypesPass(PreserveAggregate::PreserveMode mode,
-                                          bool preservePublicTypes) {
+                                          bool preservePublicTypes,
+                                          bool insertDebugInfo) {
 
-  return std::make_unique<LowerTypesPass>(mode, preservePublicTypes);
+  return std::make_unique<LowerTypesPass>(mode, preservePublicTypes,
+                                          insertDebugInfo);
 }

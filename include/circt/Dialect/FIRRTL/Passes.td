@@ -70,6 +70,8 @@ def LowerFIRRTLTypes : Pass<"firrtl-lower-types", "firrtl::CircuitOp"> {
             clEnumValN(PreserveAggregate::Vec, "vec", "Preserve vectors"),
             clEnumValN(PreserveAggregate::All, "all", "Preserve vectors and bundles")
           )}]>
+    Option<"insertDebugInfo", "insert-debug-info", "bool", "false",
+           "Insert debug information.">
   ];
   let dependentDialects = ["hw::HWDialect"];
 }

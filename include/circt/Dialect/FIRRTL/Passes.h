@@ -48,7 +48,7 @@ enum PreserveMode {
 
 std::unique_ptr<mlir::Pass> createLowerFIRRTLTypesPass(
     PreserveAggregate::PreserveMode mode = PreserveAggregate::None,
-    bool preservePublicTypes = true);
+    bool preservePublicTypes = true, bool insertDebugInfo = false);
 
 std::unique_ptr<mlir::Pass> createLowerBundleVectorTypesPass();
 

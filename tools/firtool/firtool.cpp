@@ -13,6 +13,7 @@
 
 #include "circt/Conversion/ExportVerilog.h"
 #include "circt/Conversion/Passes.h"
+#include "circt/Debug/HWDebug.h"
 #include "circt/Dialect/Comb/CombDialect.h"
 #include "circt/Dialect/FIRRTL/CHIRRTLDialect.h"
 #include "circt/Dialect/FIRRTL/FIRParser.h"
@@ -354,6 +355,11 @@ static bool isRandomEnabled(RandomKind kind) {
   return disableRandom != RandomKind::All && disableRandom != kind;
 }
 
+// generate hgdb symbol table
+static cl::opt<std::string>
+    hgdbDebugFile("hgdb", cl::desc("file name for hgdb debugger file"),
+                  cl::init(""));
+
 enum OutputFormatKind {
   OutputParseOnly,
   OutputIRFir,
@@ -660,8 +666,9 @@ processBuffer(MLIRContext &context, TimingScope &ts, llvm::SourceMgr &sourceMgr,
   // The input mlir file could be firrtl dialect so we might need to clean
   // things up.
   if (!disableLowerTypes) {
-    pm.addNestedPass<firrtl::CircuitOp>(firrtl::createLowerFIRRTLTypesPass(
-        preserveAggregate, preservePublicTypes));
+    pm.addNestedPass<firrtl::CircuitOp>(firrtl::createLowerFIRRTLTypesPass
+        preserveAggregate, preservePublicTypes, !hgdbDebugFile.empty()));
+
     // Only enable expand whens if lower types is also enabled.
     if (!disableExpandWhens) {
       auto &modulePM = pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>();
@@ -889,6 +896,11 @@ processBuffer(MLIRContext &context, TimingScope &ts, llvm::SourceMgr &sourceMgr,
 
     if (failed(exportPm.run(module.get())))
       return failure();
+
+    // If specified, output HGDB debug table as well
+    if (!hgdbDebugFile.empty()) {
+      pm.addPass(circt::debug::createExportHGDBPass(hgdbDebugFile));
+    }
   }
 
   if (outputFormat == OutputIRFir || outputFormat == OutputIRHW ||
