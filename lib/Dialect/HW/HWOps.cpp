@@ -468,7 +468,7 @@ static void buildModule(OpBuilder &builder, OperationState &result,
   SmallVector<Type, 4> argTypes, resultTypes;
   SmallVector<Attribute> argAttrs, resultAttrs, debugAttrs;
   auto exportPortIdent = StringAttr::get(builder.getContext(), "hw.exportPort");
-  bool hasDebugAttr = true;
+  bool hasDebugAttr = false;
 
   for (auto elt : ports.inputs) {
     if (elt.direction == PortDirection::INOUT && !elt.type.isa<hw::InOutType>())
@@ -483,8 +483,8 @@ static void buildModule(OpBuilder &builder, OperationState &result,
       attr = builder.getDictionaryAttr({});
     argAttrs.push_back(attr);
     debugAttrs.push_back(elt.debugAttr);
-    if (!elt.debugAttr)
-      hasDebugAttr = false;
+    if (elt.debugAttr)
+      hasDebugAttr = true;
   }
 
   for (auto elt : ports.outputs) {
@@ -498,8 +498,8 @@ static void buildModule(OpBuilder &builder, OperationState &result,
       attr = builder.getDictionaryAttr({});
     resultAttrs.push_back(attr);
     debugAttrs.push_back(elt.debugAttr);
-    if (!elt.debugAttr)
-      hasDebugAttr = false;
+    if (elt.debugAttr)
+      hasDebugAttr = true;
   }
 
   // Allow clients to pass in null for the parameters list.
