@@ -1294,6 +1294,15 @@ static Value tryEliminatingConnectsToValue(Value flipValue,
     return connectSrc;
   }
 
+  if (auto *srcOp = connectSrc.getDefiningOp()) {
+    if (srcOp->hasAttr("hw.debug.name")) {
+      // If the source has debug attribute, we don't do any optimization
+      // because otherwise we will lose this symbol
+      auto str = srcOp->getAttr("hw.debug.name").cast<StringAttr>().str();
+      return {};
+    }
+  }
+
   // Convert fliped sources to passive sources.
   if (!connectSrc.getType().cast<FIRRTLBaseType>().isPassive())
     connectSrc =
@@ -2680,10 +2689,13 @@ LogicalResult FIRRTLLowering::visitDecl(NodeOp op) {
   // Node operations are logical noops, but may carry annotations or be
   // referred to through an inner name. If a don't touch is present, ensure
   // that we have a symbol name so we can keep the node as a wire.
+<<<<<<< HEAD
   auto symName = getInnerSymName(op);
   auto name = op.getNameAttr();
-  if (AnnotationSet::removeAnnotations(
-          op, "firrtl.transforms.DontTouchAnnotation") &&
+  // Or we have debug attribute attached
+  if ((AnnotationSet::removeAnnotations(
+          op, "firrtl.transforms.DontTouchAnnotation") ||
+       op->hasAttr("hw.debug.name")) &&
       !symName) {
     // name may be empty
     auto moduleName = cast<hw::HWModuleOp>(op->getParentOp()).getName();
@@ -2703,6 +2715,7 @@ LogicalResult FIRRTLLowering::visitDecl(NodeOp op) {
     auto assign = builder.create<sv::AssignOp>(wire, operand);
     if (auto debugAttr = op->getAttr("hw.debug.name")) {
       assign->setAttr("hw.debug.name", debugAttr);
+      wire->setAttr("hw.debug.name", debugAttr);
     }
   }
 

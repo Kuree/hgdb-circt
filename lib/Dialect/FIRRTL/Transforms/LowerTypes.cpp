@@ -568,7 +568,17 @@ bool TypeLoweringVisitor::lowerProducer(
   SmallVector<FlatBundleFieldEntry, 8> fieldTypes;
 
   if (!peelType(srcType, fieldTypes, aggregatePreservationMode))
+    if (insertDebugInfo && !op->hasAttr("hw.debug.name")) {
+      // If it's not a temp nodes produced by Chisel. For now, we use a
+      // naming heuristics: all temp nodes are prefixed with _. However, in
+      // case where users create such node, this hack will fail
+      if (auto nameAttr = op->getAttrOfType<StringAttr>("name")) {
+        if (nameAttr.size() > 0 && nameAttr.data()[0] != '_')
+          op->setAttr("hw.debug.name", nameAttr);
+      }
+    }
     return false;
+  }
 
   // If an aggregate value has a symbol, emit errors.
   if (op->hasAttr(cache.innerSymAttr)) {
@@ -735,8 +745,17 @@ bool TypeLoweringVisitor::lowerArg(FModuleLike module, size_t argIndex,
   // Flatten any bundle types.
   SmallVector<FlatBundleFieldEntry> fieldTypes;
   auto srcType = newArgs[argIndex].type.cast<FIRRTLType>();
-  if (!peelType(srcType, fieldTypes, getPreservatinoModeForModule(module)))
+
+  if (!peelType(srcType, fieldTypes, getPreservatinoModeForModule(module))) {
+    // Use its default name instead
+    if (insertDebugInfo) {
+      auto attrs = mlir::DictionaryAttr::get(
+          context, {{StringAttr::get(context, "hw.debug.name"),
+                     newArgs[argIndex].name}});
+      newArgs[argIndex].annotations.addAnnotations(attrs);
+    }
     return false;
+  }
 
   // Get original arg name
   auto originalName = newArgs[argIndex].name;
