@@ -567,7 +567,7 @@ bool TypeLoweringVisitor::lowerProducer(
     return false;
   SmallVector<FlatBundleFieldEntry, 8> fieldTypes;
 
-  if (!peelType(srcType, fieldTypes, aggregatePreservationMode))
+  if (!peelType(srcType, fieldTypes, aggregatePreservationMode)) {
     if (insertDebugInfo && !op->hasAttr("hw.debug.name")) {
       // If it's not a temp nodes produced by Chisel. For now, we use a
       // naming heuristics: all temp nodes are prefixed with _. However, in
@@ -601,6 +601,8 @@ bool TypeLoweringVisitor::lowerProducer(
 
   bool isArray = srcType.isa<FVectorType>();
 
+  auto baseName = loweredName;
+
   for (auto fieldIdx = 0u; fieldIdx < fieldTypes.size(); fieldIdx++) {
     auto field = fieldTypes[fieldIdx];
     // if it's an array, need to add array idx
@@ -626,11 +628,10 @@ bool TypeLoweringVisitor::lowerProducer(
         newOp->setAttr(cache.nameAttr, StringAttr::get(context, loweredName));
       if (nameKindAttr)
         newOp->setAttr(cache.nameKindAttr, nameKindAttr);
+      if (insertDebugInfo)
+        newOp->setAttr("hw.debug.name", StringAttr::get(context, targetName));
     }
     lowered.push_back(newVal);
-
-    if (insertDebugInfo)
-      newOp->setAttr("hw.debug.name", StringAttr::get(context, targetName));
   }
 
   processUsers(op->getResult(0), lowered);
@@ -840,14 +841,14 @@ bool TypeLoweringVisitor::visitStmt(ConnectOp op) {
     // Store the name as well if enabled
     if (!insertDebugInfo)
       return false;
-    auto dest = op.dest();
+    auto dest = op.getDest();
     if (auto *destOp = dest.getDefiningOp()) {
       if (auto nameAttr = destOp->getAttr("name")) {
         if (auto instOp = dest.getDefiningOp<InstanceOp>()) {
           // this is an instance connection, need to treat differently
           // since the defining OP would be the instance and therefore the
           // naming would be wrong
-          auto const &results = instOp.results();
+          auto const &results = instOp.getResults();
           for (auto const &res : results) {
             if (res == dest) {
               // Need to obtain the name. a little hacky,

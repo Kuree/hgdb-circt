@@ -12,7 +12,6 @@
 #include "mlir/Pass/Pass.h"
 #include "llvm/Support/JSON.h"
 
-mlir::StringRef getSymOpName(mlir::Operation *symOp);
 mlir::StringRef getPortVerilogName(mlir::Operation *module,
                                    circt::hw::PortInfo port);
 
@@ -51,6 +50,38 @@ mlir::StringRef toString(HWDebugScopeType type) {
     return "block";
   }
   llvm_unreachable("unknown scope type");
+}
+
+/// Return the verilog name of the operations that can define a symbol.
+/// Except for <WireOp, RegOp, LogicOp, LocalParamOp, InstanceOp>, check global
+/// state `getDeclarationVerilogName` for them.
+static StringRef getSymOpName(Operation *symOp) {
+  using namespace circt::hw;
+  using namespace circt::sv;
+  // Typeswitch of operation types which can define a symbol.
+  // If legalizeNames has renamed it, then the attribute must be set.
+  if (auto attr = symOp->getAttrOfType<StringAttr>("hw.verilogName"))
+    return attr.getValue();
+  return TypeSwitch<Operation *, StringRef>(symOp)
+      .Case<HWModuleOp, HWModuleExternOp, HWModuleGeneratedOp>(
+          [](Operation *op) { return getVerilogModuleName(op); })
+      .Case<InterfaceOp>([&](InterfaceOp op) {
+        return getVerilogModuleNameAttr(op).getValue();
+      })
+      .Case<InterfaceSignalOp>(
+          [&](InterfaceSignalOp op) { return op.getSymName(); })
+      .Case<InterfaceModportOp>(
+          [&](InterfaceModportOp op) { return op.getSymName(); })
+      .Default([&](Operation *op) {
+        if (auto attr = op->getAttrOfType<StringAttr>("name"))
+          return attr.getValue();
+        if (auto attr = op->getAttrOfType<StringAttr>("instanceName"))
+          return attr.getValue();
+        if (auto attr =
+                op->getAttrOfType<StringAttr>(SymbolTable::getSymbolAttrName()))
+          return attr.getValue();
+        return StringRef("");
+      });
 }
 
 struct HWDebugScope {
@@ -405,7 +436,7 @@ public:
       // function
       auto frontEndName =
           op->getAttr("hw.debug.name").cast<mlir::StringAttr>().strref();
-      auto rtlName = ::getSymOpName(op);
+      auto rtlName = getSymOpName(op);
       // For now, we use the size of the map as ID
       auto id = mlir::StringAttr::get(op->getContext(),
                                       std::to_string(context.vars.size()));
@@ -505,14 +536,14 @@ public:
     // code refactoring since this is duplicated logic
     const char *symop[] = {"==", "!=", "<",  "<=", ">",
                            ">=", "<",  "<=", ">",  ">="};
-    auto pred = static_cast<uint64_t>(op.predicate());
+    auto pred = static_cast<uint64_t>(op.getPredicate());
     visitBinary(op, symop[pred]);
   }
 
   // type ops
   using TypeOpVisitor::visitTypeOp;
   // supported
-  void visitTypeOp(circt::hw::ConstantOp op) { printConstant(op.value()); }
+  void visitTypeOp(circt::hw::ConstantOp op) { printConstant(op.getValue()); }
 
   // SV ops
   using Visitor::visitSV;
@@ -580,7 +611,7 @@ public:
   using StmtVisitor::visitStmt;
 
   void visitStmt(circt::hw::InstanceOp op) {
-    auto instNameRef = ::getSymOpName(op);
+    auto instNameRef = getSymOpName(op);
     // need to find definition names
     auto *mod = op.getReferencedModule(nullptr);
     auto moduleNameStr = circt::hw::getVerilogModuleNameAttr(mod).strref();
@@ -619,19 +650,19 @@ public:
   // we only care about the target of the assignment
   void visitSV(circt::sv::AssignOp op) {
     if (hasDebug(op)) {
-      handleAssign(op.dest(), op.src(), op.src().getDefiningOp(), op);
+      handleAssign(op.getDest(), op.getSrc(), op.getSrc().getDefiningOp(), op);
     }
   }
 
   void visitSV(circt::sv::BPAssignOp op) {
     if (hasDebug(op)) {
-      handleAssign(op.dest(), op.src(), op.src().getDefiningOp(), op);
+      handleAssign(op.getDest(), op.getSrc(), op.getSrc().getDefiningOp(), op);
     }
   }
 
   void visitSV(circt::sv::PAssignOp op) {
     if (hasDebug(op)) {
-      handleAssign(op.dest(), op.src(), op.src().getDefiningOp(), op);
+      handleAssign(op.getDest(), op.getSrc(), op.getSrc().getDefiningOp(), op);
     }
   }
 
@@ -692,11 +723,11 @@ public:
 
   void visitSV(circt::sv::IfOp op) {
     // first, the statement itself is a line
-    auto cond = getCondString(op.cond());
+    auto cond = getCondString(op.getCond());
     if (cond.empty()) {
-      op.cond().getDefiningOp()->emitError(
+      op.getCond().getDefiningOp()->emitError(
           "Unsupported if statement condition");
-      cond = getCondString(op.cond());
+      cond = getCondString(op.getCond());
       return;
     }
     builder.createScope(op, currentScope);
@@ -726,14 +757,15 @@ public:
     }
   }
 
-  void visitSV(circt::sv::CaseZOp op) {
-    auto cond = getCondString(op.cond());
+  void visitSV(circt::sv::CaseOp op) {
+    auto cond = getCondString(op.getCond());
     if (cond.empty()) {
       op->emitError("Unsupported case statement condition");
       return;
     }
 
-    auto addScope = [op, this](const std::string caseCond, mlir::Block *block) {
+    auto addScope = [op, this](const std::string &caseCond,
+                               mlir::Block *block) {
       // use nullptr since it's auxiliary
       auto *scope = builder.createScope(nullptr, currentScope);
       auto *temp = currentScope;
@@ -745,17 +777,20 @@ public:
 
     mlir::Block *defaultBlock = nullptr;
     llvm::SmallVector<uint64_t> values;
-    for (auto caseInfo : op.getCases()) {
-      auto pattern = caseInfo.pattern;
-      if (pattern.isDefault()) {
+    for (auto const &caseInfo : op.getCases()) {
+      auto const &pattern = caseInfo.pattern;
+      if (pattern->getKind() ==
+          circt::sv::CasePattern::CasePatternKind::CPK_default) {
         defaultBlock = caseInfo.block;
       } else {
         // Currently, hgdb doesn't support z or ?
         // so we have to turn the pattern into an integer
-        auto value = pattern.attr.getUInt();
-        auto caseCond = cond + " == " + std::to_string(value);
-        addScope(caseCond, caseInfo.block);
-        values.emplace_back(value);
+        auto attr = pattern->attr();
+        if (auto value = mlir::isa<mlir::IntegerAttr>(attr)) {
+          auto caseCond = cond + " == " + std::to_string(value);
+          addScope(caseCond, caseInfo.block);
+          values.emplace_back(value);
+        }
       }
     }
     if (defaultBlock) {
@@ -817,29 +852,29 @@ private:
             {
               auto *scope =
                   builder.createScope(mux.getOperation(), currentScope);
-              auto cond = getCondString(mux.cond());
+              auto cond = getCondString(mux.getCond());
               if (cond.empty()) {
                 mux->emitError("Unable to obtain mux condition expression");
               }
               scope->condition = StringAttr::get(op->getContext(), cond);
               currentScope = scope;
-              handleAssign(target, mux.trueValue(),
-                           mux.trueValue().getDefiningOp(), assignOp);
+              handleAssign(target, mux.getTrueValue(),
+                           mux.getTrueValue().getDefiningOp(), assignOp);
             }
             currentScope = temp;
 
             {
               auto *scope =
                   builder.createScope(mux.getOperation(), currentScope);
-              auto cond = getCondString(mux.cond());
+              auto cond = getCondString(mux.getCond());
               if (cond.empty()) {
                 mux->emitError("Unable to obtain mux condition expression");
               }
               scope->condition =
                   mlir::StringAttr::get(op->getContext(), "!" + cond);
               currentScope = scope;
-              handleAssign(target, mux.falseValue(),
-                           mux.falseValue().getDefiningOp(), assignOp);
+              handleAssign(target, mux.getFalseValue(),
+                           mux.getFalseValue().getDefiningOp(), assignOp);
             }
             currentScope = temp;
             handled = true;

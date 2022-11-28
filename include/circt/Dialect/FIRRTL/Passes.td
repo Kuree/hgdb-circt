@@ -69,7 +69,7 @@ def LowerFIRRTLTypes : Pass<"firrtl-lower-types", "firrtl::CircuitOp"> {
             clEnumValN(PreserveAggregate::OneDimVec, "1d-vec", "Preserve 1d vectors"),
             clEnumValN(PreserveAggregate::Vec, "vec", "Preserve vectors"),
             clEnumValN(PreserveAggregate::All, "all", "Preserve vectors and bundles")
-          )}]>
+          )}]>,
     Option<"insertDebugInfo", "insert-debug-info", "bool", "false",
            "Insert debug information.">
   ];

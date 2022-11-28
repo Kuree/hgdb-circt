@@ -2314,6 +2314,7 @@ Value FIRRTLLowering::getReadValue(Value v) {
     if (auto debugAttr = vOp->getAttr("hw.debug.name")) {
       result.getDefiningOp()->setAttr("hw.debug.name", debugAttr);
     }
+  }
   builder.restoreInsertionPoint(oldIP);
   readInOutCreated.insert({v, result});
   return result;
@@ -2711,7 +2712,6 @@ LogicalResult FIRRTLLowering::visitDecl(NodeOp op) {
     auto wire = builder.create<sv::WireOp>(operand.getType(), name, symName);
     auto assign = builder.create<sv::AssignOp>(wire, operand);
     operand = builder.create<sv::ReadInOutOp>(wire);
-    auto assign = builder.create<sv::AssignOp>(wire, operand);
     if (auto debugAttr = op->getAttr("hw.debug.name")) {
       assign->setAttr("hw.debug.name", debugAttr);
       wire->setAttr("hw.debug.name", debugAttr);
@@ -3748,10 +3748,7 @@ void FIRRTLLowering::lowerRegConnect(const FieldRef &fieldRef, Value dest,
     nextValue =
         inject(seqReg.getNext(), regOp->getResult(0).getType(), fieldID);
   }
-  auto assignOp = seqReg.getNextMutable().assign(nextValue);
-  if (auto debugAttr = op->getAttr("hw.debug.name")) {
-    assignOp->setAttr("hw.debug.name", debugAttr);
-  }
+  seqReg.getNextMutable().assign(nextValue);
 }
 
 LogicalResult FIRRTLLowering::visitStmt(ConnectOp op) {
