@@ -29,6 +29,7 @@
 #include "circt/Dialect/Seq/SeqPasses.h"
 #include "circt/Dialect/SystemC/SystemCPasses.h"
 #include "circt/Transforms/Passes.h"
+#include "circt/Debug/HWDebug.h"
 
 namespace circt {
 
@@ -52,6 +53,9 @@ inline void registerAllPasses() {
   hw::registerPasses();
   pipeline::registerPasses();
   systemc::registerPasses();
+
+  // Debug pass
+  debug::registerPasses();
 }
 
 } // namespace circt

@@ -2689,7 +2689,6 @@ LogicalResult FIRRTLLowering::visitDecl(NodeOp op) {
   // Node operations are logical noops, but may carry annotations or be
   // referred to through an inner name. If a don't touch is present, ensure
   // that we have a symbol name so we can keep the node as a wire.
-<<<<<<< HEAD
   auto symName = getInnerSymName(op);
   auto name = op.getNameAttr();
   // Or we have debug attribute attached

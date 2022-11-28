@@ -5,6 +5,7 @@ add_circt_translation_library(CIRCTDebug
 
   DEPENDS
   CIRCTConversionPassIncGen
+  CIRCTDebugIncGen
 
   LINK_COMPONENTS
   Core

@@ -928,7 +928,7 @@ void setScopeFilename(HWDebugScope *scope, HWDebugBuilder &builder) {
   }
 }
 
-void exportDebugTable(mlir::ModuleOp moduleOp, const std::string &filename) {
+void exportDebugTable(mlir::ModuleOp moduleOp, Optional<std::string> filename) {
   // collect all the files
   HWDebugContext context;
   HWDebugBuilder builder(context);
@@ -951,16 +951,18 @@ void exportDebugTable(mlir::ModuleOp moduleOp, const std::string &filename) {
   }
   auto json = context.toJSON();
 
-  std::error_code error;
-  llvm::raw_fd_ostream os(filename, error);
-  if (!error) {
-    os << json;
+  if (filename) {
+    std::error_code error;
+    llvm::raw_fd_ostream os(*filename, error);
+    if (!error) {
+      os << json;
+    }
+    os.close();
   }
-  os.close();
 }
 
 struct ExportDebugTablePass : public ::mlir::OperationPass<mlir::ModuleOp> {
-  ExportDebugTablePass(std::string filename)
+  ExportDebugTablePass(Optional<std::string> filename)
       : ::mlir::OperationPass<mlir::ModuleOp>(
             ::mlir::TypeID::get<ExportDebugTablePass>()),
         filename(filename) {}
@@ -1011,11 +1013,11 @@ struct ExportDebugTablePass : public ::mlir::OperationPass<mlir::ModuleOp> {
   }
 
 private:
-  std::string filename;
+  Optional<std::string> filename;
 };
 
-std::unique_ptr<mlir::Pass> createExportHGDBPass(std::string filename) {
-  return std::make_unique<ExportDebugTablePass>(std::move(filename));
+std::unique_ptr<mlir::Pass> createExportHGDBPass(Optional<std::string> filename) {
+  return std::make_unique<ExportDebugTablePass>(filename);
 }
 
 } // namespace circt::debug

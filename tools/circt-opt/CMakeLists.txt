@@ -60,6 +60,7 @@ target_link_libraries(circt-opt
   CIRCTSystemC
   CIRCTSystemCTransforms
   CIRCTTransforms
+  CIRCTDebug
 
   MLIRIR
   MLIRLLVMDialect
