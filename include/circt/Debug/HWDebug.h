@@ -5,7 +5,7 @@
 
 namespace circt::debug {
 std::unique_ptr<mlir::Pass>
-createExportHGDBPass(Optional<std::string> filename = {});
+createExportHGDBPass(llvm::Optional<std::string> filename = {});
 
 #define GEN_PASS_REGISTRATION
 #include "circt/Debug/DebugPasses.h.inc"

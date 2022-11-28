@@ -16,7 +16,7 @@
 
 include "mlir/Pass/PassBase.td"
 
-def HWExportHGDB: Pass<"hgdb", "ModuleOp"> {
+def HWExportHGDB: Pass<"hgdb", "mlir::ModuleOp"> {
   let summary = "Export hgdb symbol table";
   let description = [{
     This pass exports the symbol table for any constructs marked with
@@ -24,10 +24,11 @@ def HWExportHGDB: Pass<"hgdb", "ModuleOp"> {
   }];
 
   let constructor = "circt::debug::createExportHGDBPass()";
-  let dependentDialects = ["circt::sv::SVDialect"];
+  let dependentDialects = ["circt::sv::SVDialect", "circt::comb::CombDialect",
+                           "circt::hw::HWDialect"];
 
   let options = [
-    Option<"filename", "filename", "std::string", "\"./\"",
+    Option<"filename", "filename", "std::string", "\"-\"",
            "Symbol table output">
   ];
 }

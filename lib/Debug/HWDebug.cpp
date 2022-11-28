@@ -2,6 +2,7 @@
 
 #include <memory>
 
+#include "circt/Debug/HWDebug.h"
 #include "circt/Dialect/Comb/CombVisitors.h"
 #include "circt/Dialect/HW/HWOps.h"
 #include "circt/Dialect/HW/HWVisitors.h"
@@ -24,6 +25,9 @@ bool isVerilogExpression(Operation *op);
 } // namespace circt::ExportVerilog
 
 namespace circt::debug {
+
+#define GEN_PASS_CLASSES
+#include "circt/Debug/DebugPasses.h.inc"
 
 struct HWDebugScope;
 class HWDebugContext;
@@ -953,70 +957,36 @@ void exportDebugTable(mlir::ModuleOp moduleOp, Optional<std::string> filename) {
 
   if (filename) {
     std::error_code error;
-    llvm::raw_fd_ostream os(*filename, error);
-    if (!error) {
-      os << json;
+    if (*filename == "-") {
+      llvm::outs() << json;
+    } else {
+      llvm::raw_fd_ostream os(*filename, error);
+      if (!error) {
+        os << json;
+      }
+      os.close();
     }
-    os.close();
+  } else {
+    llvm::outs() << json;
   }
 }
 
-struct ExportDebugTablePass : public ::mlir::OperationPass<mlir::ModuleOp> {
-  ExportDebugTablePass(Optional<std::string> filename)
-      : ::mlir::OperationPass<mlir::ModuleOp>(
-            ::mlir::TypeID::get<ExportDebugTablePass>()),
-        filename(filename) {}
-  ExportDebugTablePass(const ExportDebugTablePass &other)
-      : ::mlir::OperationPass<mlir::ModuleOp>(other), filename(other.filename) {
-  }
+struct ExportDebugTablePass
+    : public circt::debug::HWExportHGDBBase<ExportDebugTablePass> {
+  ExportDebugTablePass(llvm::Optional<std::string> filename)
+      : filename(filename) {}
 
   void runOnOperation() override {
     exportDebugTable(getOperation(), filename);
     markAllAnalysesPreserved();
   }
 
-  /// Returns the command-line argument attached to this pass.
-  static constexpr ::llvm::StringLiteral getArgumentName() {
-    return ::llvm::StringLiteral("export-hgdb");
-  }
-  ::llvm::StringRef getArgument() const override { return "export-hgdb"; }
-
-  ::llvm::StringRef getDescription() const override {
-    return "Generate symbol table for HGDB";
-  }
-
-  /// Returns the derived pass name.
-  static constexpr ::llvm::StringLiteral getPassName() {
-    return ::llvm::StringLiteral("ExportHGDB");
-  }
-  ::llvm::StringRef getName() const override { return "ExportHGDB"; }
-
-  /// Support isa/dyn_cast functionality for the derived pass class.
-  static bool classof(const ::mlir::Pass *pass) {
-    return pass->getTypeID() == ::mlir::TypeID::get<ExportDebugTablePass>();
-  }
-
-  /// A clone method to create a copy of this pass.
-  std::unique_ptr<::mlir::Pass> clonePass() const override {
-    return std::make_unique<ExportDebugTablePass>(
-        *static_cast<const ExportDebugTablePass *>(this));
-  }
-
-  /// Return the dialect that must be loaded in the context before this pass.
-  void getDependentDialects(::mlir::DialectRegistry &registry) const override {
-
-    registry.insert<circt::sv::SVDialect>();
-
-    registry.insert<circt::comb::CombDialect>();
-
-    registry.insert<circt::hw::HWDialect>();
-  }
-
 private:
   Optional<std::string> filename;
 };
 
-std::unique_ptr<mlir::Pass> createExportHGDBPass(Optional<std::string> filename) {
+std::unique_ptr<mlir::Pass>
+createExportHGDBPass(Optional<std::string> filename) {
   return std::make_unique<ExportDebugTablePass>(filename);
 }
 
