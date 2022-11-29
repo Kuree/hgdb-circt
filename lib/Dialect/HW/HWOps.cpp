@@ -862,8 +862,9 @@ SmallVector<PortInfo> hw::getAllModulePortInfos(Operation *op) {
   auto resultNames = op->getAttrOfType<ArrayAttr>("resultNames");
   auto resultTypes = getModuleType(op).getResults();
   for (unsigned i = 0, e = resultTypes.size(); i < e; ++i) {
-    auto debugAttr = debugAttrs && debugAttrs[i + argTypes.size()]
-                         ? debugAttrs[i + argTypes.size()].cast<StringAttr>()
+    auto idx = i + argTypes.size();
+    auto debugAttr = debugAttrs && (debugAttrs.size() > idx) && debugAttrs[idx]
+                         ? debugAttrs[idx].cast<StringAttr>()
                          : StringAttr{};
     results.push_back({resultNames[i].cast<StringAttr>(), PortDirection::OUTPUT,
                        resultTypes[i], i, getResultSym(op, i), debugAttr});
