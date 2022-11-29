@@ -1,3 +1,8 @@
+This is a modified version of CIRCT that supports source-level debugging via [hgdb](hgdb.dev). Below is the original
+README.
+
+---
+
 <p align="center"><img src="docs/includes/img/circt-logo.svg"/></p>
 
 [![](https://github.com/llvm/circt/workflows/Build%20and%20Test/badge.svg?event=push)](https://github.com/llvm/circt/actions?query=workflow%3A%22Build+and+Test%22)
