@@ -209,12 +209,14 @@ public:
 
   mlir::SmallVector<const HWDebugVarDef *> variables;
   llvm::DenseMap<mlir::StringRef, mlir::StringRef> instances;
+  mlir::SmallVector<const HWDebugVarDef *> outputVars;
 
   explicit HWModuleInfo(HWDebugContext &context,
                         circt::hw::HWModuleOp *moduleOp)
       : HWDebugScope(context, moduleOp->getOperation()) {
     // index the port names by value
     auto portInfo = moduleOp->getAllPorts();
+    outputVars.resize(moduleOp->getNumOutputs());
     for (auto &port : portInfo) {
       StringRef n = getPortVerilogName(*moduleOp, port);
       mlir::Value value;
@@ -224,10 +226,10 @@ public:
       }
       // also add to the generator variables
       if (port.debugAttr) {
-
         outputPorts.emplace_back(std::make_unique<HWDebugVarDef>(
             port.debugAttr.strref(), n, true, mlir::StringAttr{}));
         variables.emplace_back(outputPorts.back().get());
+        outputVars[port.argNum] = outputPorts.back().get();
       }
     }
   }
@@ -436,7 +438,12 @@ public:
       // function
       auto frontEndName =
           op->getAttr("hw.debug.name").cast<mlir::StringAttr>().strref();
-      auto rtlName = getSymOpName(op);
+      llvm::StringRef rtlName;
+      if (auto rtlValue = op->getAttr("hw.debug.value")) {
+        rtlName = rtlValue.cast<mlir::StringAttr>().strref();
+      } else {
+        rtlName = getSymOpName(op);
+      }
       // For now, we use the size of the map as ID
       auto id = mlir::StringAttr::get(op->getContext(),
                                       std::to_string(context.vars.size()));
@@ -670,6 +677,19 @@ public:
     hw::HWModuleOp parent = op->getParentOfType<hw::HWModuleOp>();
     for (auto i = 0u; i < parent.getPorts().outputs.size(); i++) {
       auto operand = op.getOperand(i);
+      // if the module has been annotated, we can still set the debug attr.
+      // this is because output doesn't need to have SSA form
+      if (auto *defOp = operand.getDefiningOp()) {
+        if (!hasDebug(defOp)) {
+          auto *varDef = module->outputVars[i];
+          defOp->setAttr(
+              "hw.debug.name",
+              mlir::StringAttr::get(defOp->getContext(), varDef->name));
+          defOp->setAttr(
+              "hw.debug.value",
+              mlir::StringAttr::get(defOp->getContext(), varDef->value));
+        }
+      }
       auto *assign = builder.createAssign(operand, op);
       if (assign)
         currentScope->scopes.emplace_back(assign);
