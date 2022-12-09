@@ -1,0 +1,21 @@
+#!/usr/bin/env python
+
+import os
+import subprocess
+import site
+import sys
+
+name = "circt-opt"
+
+# find the lib
+bin_path = ""
+paths = site.getsitepackages()
+for path in paths:
+    p = os.path.join(path, name)
+    if os.path.exists(p) :
+        bin_path = p
+        break
+if len(bin_path) == 0:
+    print(f"Unable to find {name} in path", file=sys.stderr)
+    exit(1)
+exit(subprocess.call([bin_path] + sys.argv[1:]))
